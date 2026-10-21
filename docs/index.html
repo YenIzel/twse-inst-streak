@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三大法人連續買賣超</title>
+<meta name="description" content="追蹤上市個股外資、投信、自營商連續買超或賣超 3、5、10 日以上，資料來源臺灣證券交易所。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #F2F4F7;
+  --surface: #FFFFFF;
+  --ink: #1A2230;
+  --muted: #5B6675;
+  --rule: #D5DAE1;
+  --zero: #DCE0E6;
+  --red: #C62828;
+  --red-soft: #FBE9E9;
+  --green: #17734A;
+  --green-soft: #E3F3EA;
+  --accent: var(--red);
+  --accent-soft: var(--red-soft);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #10151D; --surface: #18202B; --ink: #E6EAF0; --muted: #98A3B3;
+    --rule: #2B3542; --zero: #2E3946;
+    --red: #FF6B6B; --red-soft: #3A1F24; --green: #3DD68C; --green-soft: #173327;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #10151D; --surface: #18202B; --ink: #E6EAF0; --muted: #98A3B3;
+  --rule: #2B3542; --zero: #2E3946;
+  --red: #FF6B6B; --red-soft: #3A1F24; --green: #3DD68C; --green-soft: #173327;
+  color-scheme: dark;
+}
+body[data-side="sell"] { --accent: var(--green); --accent-soft: var(--green-soft); }
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 15px/1.6 "Noto Sans TC", system-ui, -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
+
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 24px; }
+h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: .02em; }
+.stamp { color: var(--muted); font-size: 13px; }
+.stamp b { color: var(--ink); font-weight: 500; }
+
+/* ── 篩選 ── */
+.controls { margin-top: 20px; display: grid; gap: 14px; }
+
+.side {
+  display: grid; grid-template-columns: 1fr 1fr; max-width: 420px;
+  border: 2px solid var(--accent); border-radius: 10px; overflow: hidden;
+}
+body.ready .side { transition: border-color .25s; }
+.side button {
+  appearance: none; border: 0; margin: 0; cursor: pointer;
+  padding: 12px 0; font-family: inherit; font-size: 18px; font-weight: 700; line-height: 1;
+  background: var(--surface); color: var(--muted);
+}
+body.ready .side button { transition: background-color .25s, color .25s; }
+.side button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+:root[data-theme="dark"] .side button[aria-pressed="true"] { color: #10151D; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .side button[aria-pressed="true"] { color: #10151D; } }
+
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.row > .lbl { width: 3.5em; color: var(--muted); font-size: 14px; flex: none; }
+.chip {
+  appearance: none; cursor: pointer; font-family: inherit; font-size: 15px; font-weight: 500; line-height: 1;
+  padding: 9px 14px; border-radius: 999px;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+}
+.chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.chip .ck { display: inline-block; width: 1em; }
+.mode[hidden] { display: none; }
+.mode { display: inline-flex; gap: 12px; margin-left: 6px; font-size: 14px; color: var(--muted); }
+.mode label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.mode input { accent-color: var(--accent); margin: 0; }
+.hint { color: var(--muted); font-size: 13px; }
+
+/* ── 結果列 ── */
+.bar {
+  margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--rule);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+}
+.count { font-size: 15px; margin-right: auto; }
+.count strong { font-size: 24px; font-weight: 700; color: var(--accent); margin-right: 2px; }
+.search {
+  font: inherit; padding: 7px 10px; width: 170px; border-radius: 8px;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+}
+.etf { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); cursor: pointer; }
+.etf input { accent-color: var(--accent); margin: 0; }
+
+/* ── 表格 ── */
+.table-box {
+  margin-top: 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
+  overflow: auto; max-height: calc(100vh - 120px);
+}
+table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px; }
+th, td { padding: 8px 12px; white-space: nowrap; border-bottom: 1px solid var(--rule); }
+thead th {
+  position: sticky; top: 0; z-index: 2; background: var(--surface);
+  font-weight: 500; color: var(--muted); font-size: 13px; text-align: right;
+}
+thead tr.grp th { top: 0; height: 32px; padding-bottom: 0; text-align: center; color: var(--ink); font-size: 14px; border-bottom: 0; }
+thead tr.sub th { top: 32px; }
+thead th.l, td.l { text-align: left; }
+td { text-align: right; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--paper); }
+th.sticky, td.sticky { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+thead th.sticky { z-index: 3; }
+td.code a { font-weight: 500; text-decoration: none; }
+td.code a:hover { text-decoration: underline; }
+td.name { padding-left: 0; }
+th.gstart, td.gstart { border-left: 1px solid var(--rule); }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--ink); }
+th[aria-sort] { color: var(--accent); }
+th[aria-sort="descending"]::after { content: " ▼"; font-size: 10px; }
+th[aria-sort="ascending"]::after { content: " ▲"; font-size: 10px; }
+
+.pos { color: var(--red); }
+.neg { color: var(--green); }
+.dim { color: var(--muted); }
+.streak { font-weight: 700; }
+.streak.hit { color: var(--accent); }
+.total { font-weight: 700; }
+
+/* 近 10 日買賣超方塊，右邊是最新一天 */
+.strip { display: inline-flex; gap: 2px; vertical-align: middle; }
+.strip i { width: 7px; height: 14px; border-radius: 1.5px; background: var(--zero); }
+.strip i.p { background: var(--red); }
+.strip i.n { background: var(--green); }
+.strip i.out { opacity: .45; }
+
+.empty { padding: 40px 16px; text-align: center; color: var(--muted); }
+.empty b { display: block; color: var(--ink); font-weight: 500; margin-bottom: 4px; }
+
+footer { margin-top: 18px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+footer a { color: var(--muted); }
+
+@media (max-width: 640px) {
+  .wrap { padding-top: 18px; }
+  h1 { font-size: 20px; }
+  .side { max-width: none; }
+  .row > .lbl { width: 100%; }
+  .mode { margin-left: 0; }
+  .search { width: 100%; order: 3; }
+  .table-box { max-height: calc(100dvh - 24px); }
+  th, td { padding: 7px 9px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body data-side="buy">
+<div class="wrap">
+  <header>
+    <h1>三大法人連續買賣超</h1>
+    <div class="stamp" id="stamp">資料載入中</div>
+  </header>
+
+  <section class="controls" aria-label="篩選條件">
+    <div class="side" role="group" aria-label="買賣方向">
+      <button type="button" data-side="buy" aria-pressed="true">買超</button>
+      <button type="button" data-side="sell" aria-pressed="false">賣超</button>
+    </div>
+
+    <div class="row" role="group" aria-label="法人">
+      <span class="lbl">法人</span>
+      <span id="inst-chips" class="row"></span>
+      <span class="mode" id="mode-box">
+        <label><input type="radio" name="mode" value="all" checked>同時符合</label>
+        <label><input type="radio" name="mode" value="any">任一符合</label>
+      </span>
+    </div>
+
+    <div class="row" role="group" aria-label="連續天數">
+      <span class="lbl">連續</span>
+      <button type="button" class="chip" data-days="3">3 日</button>
+      <button type="button" class="chip" data-days="5">5 日</button>
+      <button type="button" class="chip" data-days="10">10 日</button>
+      <span class="hint">以上，算到最新交易日</span>
+    </div>
+  </section>
+
+  <div class="bar">
+    <div class="count" id="count" aria-live="polite"></div>
+    <input class="search" id="q" type="search" placeholder="搜尋代號或名稱" aria-label="搜尋代號或名稱">
+    <label class="etf"><input type="checkbox" id="no-etf">排除 ETF／ETN</label>
+  </div>
+
+  <div class="table-box"><table id="tbl"></table></div>
+
+  <footer>
+    張數＝股數÷1000，四捨五入。外資為「外資及陸資」合計（含外資自營商），自營商為「自行買賣＋避險」合計。
+    方塊為近 10 個交易日的每日買賣超，最右邊是最新一天，淡色是不在所選天數內的日子。<br>
+    資料來源：臺灣證券交易所
+    <a href="https://www.twse.com.tw/zh/trading/foreign/twt38u.html" target="_blank" rel="noopener">外資及陸資</a>、
+    <a href="https://www.twse.com.tw/zh/trading/foreign/twt44u.html" target="_blank" rel="noopener">投信</a>、
+    <a href="https://www.twse.com.tw/zh/trading/foreign/twt43u.html" target="_blank" rel="noopener">自營商</a>買賣超彙總表。僅供參考，不構成投資建議。
+  </footer>
+</div>
+
+<script>
+(() => {
+  const INST = [
+    { key: "foreign", label: "外資" },
+    { key: "trust",   label: "投信" },
+    { key: "dealer",  label: "自營商" },
+  ];
+  const DAYS = [3, 5, 10];
+
+  // ── 狀態（同步到網址，方便加書籤） ──
+  const qs = new URLSearchParams(location.search);
+  const state = {
+    side: qs.get("side") === "sell" ? "sell" : "buy",
+    inst: (qs.get("inst") || "foreign,trust").split(",").filter(k => INST.some(i => i.key === k)),
+    days: DAYS.includes(+qs.get("days")) ? +qs.get("days") : 3,
+    mode: qs.get("mode") === "any" ? "any" : "all",
+    q: "",
+    noEtf: qs.get("etf") === "0",
+    sort: null,           // { key, dir }
+  };
+  if (!state.inst.length) state.inst = ["foreign"];
+
+  let DATA = null;
+  const $ = s => document.querySelector(s);
+  const fmt = new Intl.NumberFormat("zh-TW", { signDisplay: "exceptZero" });
+  const fmtDate = s => `${s.slice(0, 4)}/${s.slice(4, 6)}/${s.slice(6)}`;
+  const weekday = s => "日一二三四五六"[new Date(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6)).getDay()];
+
+  // ── 控制元件 ──
+  const chipBox = $("#inst-chips");
+  INST.forEach(i => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.dataset.inst = i.key;
+    b.innerHTML = `<span class="ck" aria-hidden="true"></span>${i.label}`;
+    chipBox.appendChild(b);
+  });
+
+  document.querySelectorAll(".side button").forEach(b =>
+    b.addEventListener("click", () => { state.side = b.dataset.side; state.sort = null; update(); }));
+  chipBox.addEventListener("click", e => {
+    const b = e.target.closest("[data-inst]"); if (!b) return;
+    const k = b.dataset.inst;
+    if (state.inst.includes(k)) { if (state.inst.length > 1) state.inst = state.inst.filter(x => x !== k); }
+    else state.inst = INST.map(i => i.key).filter(x => x === k || state.inst.includes(x));
+    state.sort = null; update();
+  });
+  document.querySelectorAll("[data-days]").forEach(b =>
+    b.addEventListener("click", () => { state.days = +b.dataset.days; update(); }));
+  document.querySelectorAll('input[name="mode"]').forEach(r =>
+    r.addEventListener("change", () => { state.mode = r.value; update(); }));
+  $("#q").addEventListener("input", e => { state.q = e.target.value.trim(); render(); });
+  $("#no-etf").addEventListener("change", e => { state.noEtf = e.target.checked; update(); });
+
+  function syncControls() {
+    document.body.dataset.side = state.side;
+    document.querySelectorAll(".side button").forEach(b =>
+      b.setAttribute("aria-pressed", b.dataset.side === state.side));
+    chipBox.querySelectorAll("[data-inst]").forEach(b => {
+      const on = state.inst.includes(b.dataset.inst);
+      b.setAttribute("aria-pressed", on);
+      b.querySelector(".ck").textContent = on ? "✓" : "";
+    });
+    document.querySelectorAll("[data-days]").forEach(b =>
+      b.setAttribute("aria-pressed", +b.dataset.days === state.days));
+    document.querySelectorAll('input[name="mode"]').forEach(r => r.checked = r.value === state.mode);
+    $("#mode-box").hidden = state.inst.length < 2;
+    $("#no-etf").checked = state.noEtf;
+
+    const p = new URLSearchParams({ side: state.side, inst: state.inst.join(","), days: state.days });
+    if (state.mode === "any") p.set("mode", "any");
+    if (state.noEtf) p.set("etf", "0");
+    history.replaceState(null, "", "?" + p);
+  }
+
+  function update() { syncControls(); render(); }
+
+  // ── 篩選與排序 ──
+  function rows() {
+    if (!DATA) return [];
+    const sign = state.side === "buy" ? 1 : -1;
+    const idx = state.inst.map(k => INST.findIndex(i => i.key === k));
+    const N = state.days;
+    const q = state.q.toLowerCase();
+    const out = [];
+    for (const s of DATA.stocks) {
+      if (state.noEtf && s.c.startsWith("0")) continue;
+      if (q && !s.c.toLowerCase().includes(q) && !s.n.toLowerCase().includes(q)) continue;
+      const hits = idx.map(k => s.s[k] * sign >= N);
+      const ok = state.mode === "all" ? hits.every(Boolean) : hits.some(Boolean);
+      if (!ok) continue;
+      const per = idx.map((k, j) => ({
+        streak: s.s[k],
+        hit: hits[j],
+        sum: s.v[k].slice(0, N).reduce((a, b) => a + b, 0),
+        v: s.v[k],
+      }));
+      out.push({ c: s.c, n: s.n, per, total: per.reduce((a, p) => a + p.sum, 0) });
+    }
+    const sort = state.sort || { key: "total", dir: sign > 0 ? "desc" : "asc" };
+    const val = r => {
+      if (sort.key === "total") return r.total;
+      if (sort.key === "code") return r.c;
+      const [kind, j] = sort.key.split(":");
+      return kind === "streak" ? Math.abs(r.per[+j].streak) : r.per[+j].sum;
+    };
+    const d = sort.dir === "asc" ? 1 : -1;
+    out.sort((a, b) => {
+      const x = val(a), y = val(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * d || a.c.localeCompare(b.c);
+    });
+    return out;
+  }
+
+  // ── 繪製表格 ──
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const cls = v => v > 0 ? "pos" : v < 0 ? "neg" : "dim";
+
+  function streakText(n) {
+    if (!n) return '<span class="dim">—</span>';
+    const a = Math.abs(n);
+    const capped = DATA && a >= DATA.history;
+    return `${n > 0 ? "買" : "賣"} ${capped ? "≥" : ""}${a} 日`;
+  }
+
+  function strip(v, N) {
+    const days = DATA.dates;
+    let html = '<span class="strip" aria-hidden="true">';
+    for (let i = Math.min(v.length, 10) - 1; i >= 0; i--) {
+      const c = v[i] > 0 ? "p" : v[i] < 0 ? "n" : "";
+      const out = i >= N ? " out" : "";
+      html += `<i class="${c}${out}" title="${fmtDate(days[i] || "")}：${fmt.format(v[i])} 張"></i>`;
+    }
+    return html + "</span>";
+  }
+
+  function th(label, key, extra = "") {
+    const s = state.sort || { key: "total", dir: state.side === "buy" ? "desc" : "asc" };
+    const aria = s.key === key ? ` aria-sort="${s.dir === "asc" ? "ascending" : "descending"}"` : "";
+    return `<th class="sortable ${extra}" data-sort="${key}"${aria} tabindex="0">${label}</th>`;
+  }
+
+  function render() {
+    const tbl = $("#tbl");
+    if (!DATA) return;
+    const list = rows();
+    const N = state.days;
+    const sideTxt = state.side === "buy" ? "買超" : "賣超";
+    const instTxt = state.inst.map(k => INST.find(i => i.key === k).label)
+      .join(state.mode === "all" ? "＋" : "或");
+    $("#count").innerHTML = `<strong>${list.length}</strong> 檔　${instTxt}連續${sideTxt} ${N} 日以上`;
+
+    const multi = state.inst.length > 1;
+    let head = '<thead><tr class="grp"><th class="sticky l" colspan="2"></th>';
+    state.inst.forEach(k => head += `<th class="gstart" colspan="3">${INST.find(i => i.key === k).label}</th>`);
+    if (multi) head += '<th class="gstart"></th>';
+    head += '</tr><tr class="sub">' + th("代號", "code", "sticky l") + '<th class="l">名稱</th>';
+    state.inst.forEach((k, j) => {
+      head += th("連續", `streak:${j}`, "gstart") + `<th>近 10 日</th>` + th(`${N} 日累計(張)`, multi ? `sum:${j}` : "total");
+    });
+    if (multi) head += th(`合計(張)`, "total", "gstart");
+    head += "</tr></thead>";
+
+    if (!list.length) {
+      const cols = 2 + state.inst.length * 3 + (multi ? 1 : 0);
+      tbl.innerHTML = head + `<tbody><tr><td colspan="${cols}" class="empty"><b>沒有符合條件的個股</b>` +
+        `試試減少勾選的法人、改成「任一符合」，或縮短連續天數。</td></tr></tbody>`;
+      return;
+    }
+
+    let body = "<tbody>";
+    for (const r of list) {
+      body += `<tr><td class="sticky l code"><a href="https://tw.stock.yahoo.com/quote/${esc(r.c)}.TW" target="_blank" rel="noopener">${esc(r.c)}</a></td>` +
+        `<td class="l name">${esc(r.n)}</td>`;
+      r.per.forEach(p => {
+        body += `<td class="gstart streak ${p.hit ? "hit" : cls(p.streak)}">${streakText(p.streak)}</td>` +
+          `<td>${strip(p.v, N)}</td>` +
+          `<td class="${cls(p.sum)}">${fmt.format(p.sum)}</td>`;
+      });
+      if (multi) body += `<td class="gstart total ${cls(r.total)}">${fmt.format(r.total)}</td>`;
+      body += "</tr>";
+    }
+    tbl.innerHTML = head + body + "</tbody>";
+  }
+
+  $("#tbl").addEventListener("click", e => sortBy(e.target.closest("th[data-sort]")));
+  $("#tbl").addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sortBy(e.target.closest("th[data-sort]")); }
+  });
+  function sortBy(th) {
+    if (!th) return;
+    const key = th.dataset.sort;
+    const cur = state.sort || { key: "total", dir: state.side === "buy" ? "desc" : "asc" };
+    const defDir = key === "code" ? "asc" : (key.startsWith("streak") || state.side === "buy") ? "desc" : "asc";
+    state.sort = { key, dir: cur.key === key ? (cur.dir === "asc" ? "desc" : "asc") : defDir };
+    render();
+  }
+
+  // ── 載入資料 ──
+  syncControls();
+  fetch("data/streaks.json?t=" + Date.now(), { cache: "no-store" })
+    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then(d => {
+      DATA = d;
+      const up = new Date(d.updated);
+      const upTxt = isNaN(up) ? d.updated :
+        up.toLocaleString("zh-TW", { timeZone: "Asia/Taipei", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+      $("#stamp").innerHTML = `資料日 <b>${fmtDate(d.latest)}（${weekday(d.latest)}）</b>　更新於 ${upTxt}`;
+      render();
+      requestAnimationFrame(() => document.body.classList.add("ready"));
+    })
+    .catch(err => {
+      $("#stamp").textContent = "資料載入失敗";
+      $("#tbl").innerHTML = `<tbody><tr><td class="empty"><b>讀不到 data/streaks.json（${esc(err.message)}）</b>` +
+        `請先執行 python scripts/update.py 產生資料，並用網頁伺服器開啟本頁（直接點開 html 檔無法讀取資料）。</td></tr></tbody>`;
+    });
+})();
+</script>
+</body>
+</html>
