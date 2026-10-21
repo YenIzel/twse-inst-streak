@@ -88,6 +88,14 @@ def to_int(s) -> int:
     return int(float(s))
 
 
+WARRANT_PREFIXES = ("03", "04", "05", "06", "07", "08")
+
+
+def is_warrant(code: str) -> bool:
+    """上市權證、牛熊證：6 碼且 03～08 開頭（如 080001、04000T）。股票、ETF（00 開頭）、TDR（91 開頭）都會保留。"""
+    return len(code) == 6 and code.startswith(WARRANT_PREFIXES)
+
+
 def parse_table(payload: dict) -> tuple[dict, dict]:
     """
     回傳 ({代號: 買賣超股數}, {代號: 名稱})。
@@ -111,7 +119,7 @@ def parse_table(payload: dict) -> tuple[dict, dict]:
         if len(row) <= max(i_code, i_name, i_net):
             continue
         code = str(row[i_code]).strip()
-        if not code:
+        if not code or is_warrant(code):
             continue
         net[code] = net.get(code, 0) + to_int(row[i_net])
         names[code] = str(row[i_name]).strip()
@@ -165,7 +173,7 @@ def build_output(days: list[dict], now: dt.datetime) -> dict:
 
     latest = days[0]
     stocks = []
-    for code in sorted(latest["net"]):
+    for code in sorted(c for c in latest["net"] if not is_warrant(c)):
         s, v = [], []
         for k in range(len(SOURCES)):
             series = [d["net"].get(code, [0] * len(SOURCES))[k] for d in days]
