@@ -43,6 +43,9 @@ SOURCES = [
     ("dealer",  "自營商",     "TWT43U"),
 ]
 URL = "https://www.twse.com.tw/rwd/zh/fund/{ep}?date={date}&response=json"
+# 每月市場成交資訊：列出該月每個交易日，用來確認某天是不是真的休市
+CAL_EP = "FMTQIK"
+URLS = {CAL_EP: "https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={date}&response=json"}
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (inst-streak-tracker)",
     "Accept": "application/json",
@@ -65,7 +68,7 @@ class FetchError(RuntimeError):
 
 def fetch_json(ep: str, date: str) -> dict:
     """抓一張表；網路錯誤或被擋（回傳非 JSON）時重試。"""
-    url = URL.format(ep=ep, date=date)
+    url = URLS.get(ep, URL).format(ep=ep, date=date)
     last = None
     for attempt in range(4):
         try:
@@ -79,6 +82,24 @@ def fetch_json(ep: str, date: str) -> dict:
             print(f"  ! {ep} {date} 第 {attempt + 1} 次失敗：{e}，{wait:.0f} 秒後重試", file=sys.stderr)
             time.sleep(wait)
     raise FetchError(f"{ep} {date} 抓取失敗：{last}")
+
+
+def trading_calendar(month: str) -> set[str] | None:
+    """回傳該月（YYYYMM）證交所有交易的日期集合；抓不到則回傳 None。日期欄是民國年，如 115/10/01。"""
+    try:
+        payload = fetch_json(CAL_EP, month + "01")
+    except FetchError:
+        return None
+    if payload.get("stat") != "OK":
+        return None
+    days = set()
+    for row in payload.get("data", []):
+        try:
+            y, m, d = (int(x) for x in str(row[0]).strip().split("/"))
+            days.add(f"{y + 1911:04d}{m:02d}{d:02d}")
+        except (ValueError, IndexError):
+            continue
+    return days
 
 
 def to_int(s) -> int:
@@ -210,6 +231,7 @@ def main(root: Path = None, now: dt.datetime = None) -> int:
     closed = set(load_json(P["closed"], []))
 
     trading, fetched, errors = [], 0, []
+    calendars: dict[str, set[str] | None] = {}
     first_request = True
     for back in range(MAX_LOOKBACK):
         if len(trading) >= HISTORY:
@@ -235,9 +257,21 @@ def main(root: Path = None, now: dt.datetime = None) -> int:
             continue
 
         if day is None:
-            if d < today:       # 今天沒資料可能只是還沒公布，不記為休市
+            if d >= today:      # 今天沒資料可能只是還沒公布，不記為休市
+                print(f"  - {ds} 尚無資料")
+                continue
+            # 買賣超表偶爾會對有交易的日子回「無資料」，記成休市前先用成交日曆確認，
+            # 否則那天會被永久跳過，連續天數就會算錯
+            status = market_status(ds, today, calendars)
+            if status == "closed":
                 closed.add(ds)
-            print(f"  - {ds} 無資料")
+                print(f"  - {ds} 休市")
+            elif status == "trading":
+                print(f"  ! {ds} 有交易但買賣超表回傳無資料；下次重試", file=sys.stderr)
+                errors.append(ds)
+            else:
+                print(f"  ! {ds} 無資料，成交日曆也還無法確認是否休市；下次重試", file=sys.stderr)
+                errors.append(ds)
             continue
 
         raw_file.write_text(json.dumps(day, ensure_ascii=False, separators=(",", ":")), "utf-8")
@@ -262,7 +296,14 @@ def main(root: Path = None, now: dt.datetime = None) -> int:
     chain = contiguous_chain(trading, errors)
     days = [load_json(P["raw"] / f"{ds}.json", None) for ds in chain]
     out = build_output([d for d in days if d], now)
-    P["out"].write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), "utf-8")
+    # 資料沒變（例如假日、或同一天第二次執行）就不覆寫，讓網頁上的「更新於」維持實際抓到新資料的時間
+    old = load_json(P["out"], None)
+    strip = lambda o: {k: v for k, v in o.items() if k != "updated"}
+    if old and strip(old) == strip(out):
+        out = old
+        print("資料沒有變化，不更新輸出檔")
+    else:
+        P["out"].write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), "utf-8")
 
     print(f"完成：新抓 {fetched} 日，最新交易日 {out['latest']}，"
           f"可用 {out['history']} 個交易日，輸出 {len(out['stocks'])} 檔")
@@ -270,6 +311,36 @@ def main(root: Path = None, now: dt.datetime = None) -> int:
         # GitHub Actions 會把這行顯示成警告；下次執行會自動補抓
         print(f"::warning::以下日期抓取失敗，下次執行會自動補抓：{', '.join(errors)}")
     return 0
+
+
+def market_status(ds: str, today: dt.date, calendars: dict) -> str:
+    """
+    用證交所成交日曆判斷 ds 是 "trading"、"closed" 或 "unknown"。
+    只有在日曆已經更新到 ds 之後（同月有更晚的交易日，或下個月已有交易日）才判定休市，
+    以免日曆本身還沒更新時誤判。
+    """
+    def cal(month: str):
+        if month not in calendars:
+            time.sleep(SLEEP + random.uniform(0, 1))
+            calendars[month] = trading_calendar(month)
+        return calendars[month]
+
+    month = ds[:6]
+    days = cal(month)
+    if days is None:
+        return "unknown"
+    if ds in days:
+        return "trading"
+    if days and max(days) > ds:
+        return "closed"
+    # ds 在該月最後一個已知交易日之後：看下個月有沒有交易日
+    y, m = int(month[:4]), int(month[4:])
+    nxt = f"{y + (m == 12):04d}{m % 12 + 1:02d}"
+    if nxt <= today.strftime("%Y%m"):
+        days_next = cal(nxt)
+        if days_next:
+            return "closed"
+    return "unknown"
 
 
 def contiguous_chain(trading: list[str], errors: list[str]) -> list[str]:

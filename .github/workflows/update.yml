@@ -1,9 +1,11 @@
 name: 更新三大法人資料
 
 on:
+  # GitHub 的排程常延遲數小時，只當備援；準時的 18:30 更新由外部排程（cron-job.org）
+  # 呼叫 workflow_dispatch 觸發，設定方式見 README。重複執行沒有副作用。
   schedule:
-    - cron: "30 10 * * *"   # UTC 10:30 ＝ 台北時間每天 18:30
-  workflow_dispatch:          # 也可以在 Actions 頁面手動執行
+    - cron: "30 10 * * *"   # UTC 10:30 ＝ 台北時間 18:30（實際可能晚好幾小時）
+  workflow_dispatch:          # 外部排程、或在 Actions 頁面手動執行
 
 permissions:
   contents: write   # commit 新資料
